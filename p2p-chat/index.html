@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Level 3: P2P Chat</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/simple-peer/9.11.1/simplepeer.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+        }
+
+        .box {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin: 10px 0;
+        }
+
+        #chat-area {
+            height: 200px;
+            border: 1px solid #333;
+            overflow-y: scroll;
+            margin-bottom: 10px;
+            padding: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>Level 3: Serverless P2P Chat</h2>
+
+    <div class="box">
+        <h3>1. Your ID</h3>
+        <span id="myId">...waiting for server...</span>
+        <button onclick="copyId()">Copy ID</button>
+    </div>
+
+    <div class="box">
+        <h3>2. Connect to a Friend</h3>
+        <input type="text" id="idInput" placeholder="Paste Friend's ID here">
+        <button onclick="callUser()">Connect (Call)</button>
+    </div>
+
+    <div class="box">
+        <h3>3. Chat (P2P Data Channel)</h3>
+        <div id="chat-area"></div>
+        <input type="text" id="msgInput" placeholder="Type a message...">
+        <button onclick="sendMessage()">Send P2P</button>
+    </div>
+
+    <script>
+        const socket = io.connect('http://localhost:5000');
+        let myId = "";
+        let peer = null; // This will become the P2P connection object
+
+        // --- PART A: SIGNALING (Handshake) ---
+
+        socket.on("me", (id) => {
+            myId = id;
+            document.getElementById("myId").innerText = id;
+        });
+
+        // Incoming Call Handler
+        socket.on("callUser", (data) => {
+            console.log("Receiving call...");
+            // We are the Receiver, so initiator: false
+            peer = new SimplePeer({ initiator: false, trickle: false });
+
+            // On Signal: Send our answer back to the caller via server
+            peer.on("signal", (signalData) => {
+                socket.emit("answerCall", { signal: signalData, to: data.from });
+            });
+
+            // On Connect: The P2P pipe is open!
+            peer.on("connect", () => {
+                console.log("P2P Connection Established!");
+                document.getElementById("chat-area").innerHTML += "<i>System: Connected P2P!</i><br>";
+            });
+
+            // On Data: Receive a message directly from peer
+            peer.on("data", (data) => {
+                document.getElementById("chat-area").innerHTML += `Friend: ${data}<br>`;
+            });
+
+            // Accept the offer
+            peer.signal(data.signal);
+        });
+
+        // Response Handler (Caller receives answer)
+        socket.on("callAccepted", (signal) => {
+            console.log("Call accepted!");
+            peer.signal(signal);
+        });
+
+        // --- PART B: INITIATE CALL ---
+
+        function callUser() {
+            const idToCall = document.getElementById("idInput").value;
+
+            // We are the Caller, so initiator: true
+            peer = new SimplePeer({ initiator: true, trickle: false });
+
+            peer.on("signal", (data) => {
+                // Send our "Offer" (signal data) to the server to pass to friend
+                socket.emit("callUser", { userToCall: idToCall, signalData: data, from: myId });
+            });
+
+            peer.on("connect", () => {
+                console.log("P2P Connection Established!");
+                document.getElementById("chat-area").innerHTML += "<i>System: Connected P2P!</i><br>";
+            });
+
+            peer.on("data", (data) => {
+                document.getElementById("chat-area").innerHTML += `Friend: ${data}<br>`;
+            });
+        }
+
+        // --- PART C: SENDING DATA P2P ---
+
+        function sendMessage() {
+            const msg = document.getElementById("msgInput").value;
+            if (peer) {
+                peer.send(msg); // This sends data DIRECTLY to peer. No server involved.
+                document.getElementById("chat-area").innerHTML += `Me: ${msg}<br>`;
+                document.getElementById("msgInput").value = "";
+            } else {
+                alert("Not connected to a peer!");
+            }
+        }
+
+        function copyId() {
+            navigator.clipboard.writeText(myId);
+            alert("ID Copied!");
+        }
+    </script>
+</body>
+
+</html>
